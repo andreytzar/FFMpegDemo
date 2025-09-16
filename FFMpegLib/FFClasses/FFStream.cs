@@ -2,8 +2,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace FFMpegLib.FFClasses
 {
@@ -16,7 +18,13 @@ namespace FFMpegLib.FFClasses
         public FFCodec? Codec { get; private set; }
         public StreamType StreamType { get; private set; }= StreamType.UNKNOWN;
         public CodecID CodecID { get; private set; } = CodecID.UNKNOWN;
-        AVStream* _stream;
+        object _lock=new object();
+        
+        AVStream* _stream=null;
+        SwsContext* _swsctx=null;
+        AVFrame* _frame = null;
+        AVFrame* _rgbfame = null;
+
         public FFStream(AVStream* stream) 
         { 
             _stream = stream;
@@ -28,9 +36,100 @@ namespace FFMpegLib.FFClasses
             CodecID = (CodecID)_stream->codecpar->codec_id;
         }
 
+        void InitSWS()
+        {
+            if (StreamType != StreamType.VIDEO || Codec==null || !Codec.CodecInited || Codec.VideoParam==null|| Codec.CodecContext==null) return;
+            var param=Codec.VideoParam;
+            var sws = ffmpeg.sws_getContext(param.Width, param.Height, param.PixelFormat,
+                     param.Width, param.Height, AVPixelFormat.AV_PIX_FMT_BGR24, ffmpeg.SWS_BILINEAR, null, null, null);
+            if (sws != null)
+                _swsctx = sws;
+        }
+
+        public void ProceedPacket(AVPacket* pkt)
+        {
+            if (pkt->stream_index!=Index) return;
+            switch (StreamType)
+            {
+                case StreamType.VIDEO:
+                    ProceedVideoPacket(pkt);
+                    break;
+
+            }
+        } 
+
+        void ProceedVideoPacket(AVPacket* pkt)
+        {
+            lock (_lock)
+            {
+                if (Codec == null || !Codec.CodecInited || Codec.CodecContext == null || Codec.VideoParam==null) return;
+                if (_frame==null) _frame=ffmpeg.av_frame_alloc();
+                if (_rgbfame == null)
+                {
+                    _rgbfame = ffmpeg.av_frame_alloc();
+                    int rgbBufSize = ffmpeg.av_image_get_buffer_size(AVPixelFormat.AV_PIX_FMT_BGR24, Codec.VideoParam.Width, Codec.VideoParam.Height, 1);
+                    byte* rgbBuf = (byte*)ffmpeg.av_malloc((ulong)rgbBufSize);
+                    ffmpeg.av_image_fill_arrays(ref _rgbfame->data0, ref _rgbfame->linesize0, rgbBuf,
+                        AVPixelFormat.AV_PIX_FMT_BGR24, vCtx->width, vCtx->height, 1);
+                }
+                if (_swsctx==null) InitSWS();
+                if (_swsctx == null) return ;
+            }
+           int err=ffmpeg.avcodec_send_packet(Codec.CodecContext, pkt);
+            if (err >= 0)
+            {
+                while (ffmpeg.avcodec_receive_frame(Codec.CodecContext, _frame) == 0)
+                {
+                    ffmpeg.sws_scale(_swsctx, _frame->data, _frame->linesize, 0, Codec.VideoParam.Height,
+                        rgbFrame->data, rgbFrame->linesize);
+
+                    Application.Current.Dispatcher.Invoke(() =>
+                    {
+                        _bitmap!.WritePixels(new Int32Rect(0, 0, vCtx->width, vCtx->height),
+                            (IntPtr)rgbFrame->data[0], rgbBufSize, rgbFrame->linesize[0]);
+                        FrameReady?.Invoke(_bitmap);
+                    });
+
+                    Thread.Sleep(40);
+                }
+            }
+
+        }
+
+
+        void prepareVideoPlay()
+        {
+
+        }
+
+        void FreeVide()
+        {
+            lock (_lock)
+            {
+                if (_swsctx != null)
+                {
+                    var temp = _swsctx;
+                    ffmpeg.sws_freeContext(temp);
+                    _swsctx = null;
+                }
+            }
+        }
+        void Free()
+        {
+            lock (_lock)
+            {
+                if (_frame != null)
+                {
+                    var temp = _frame;
+                    ffmpeg.av_frame_free(temp);
+                    _frame = null;
+                }
+            }
+        }
         public void Dispose()
         {
-            throw new NotImplementedException();
+            FreeVide();
+            Codec?.Dispose();
         }
     }
 

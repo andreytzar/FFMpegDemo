@@ -1,10 +1,7 @@
 ﻿using FFmpeg.AutoGen;
 using FFMpegLib.Helpers;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.Collections.Concurrent;
+
 
 namespace FFMpegLib.FFClasses
 {
@@ -12,7 +9,7 @@ namespace FFMpegLib.FFClasses
     {
         public bool IsOpen { get; private set; } =false;
         public EventHandler<string>? OnError;
-        public List<FFStream> Streams { get; private set; }=new ();
+        public ConcurrentDictionary<int, FFStream> Streams { get; private set; }=new ();
 
         readonly object _lock = new object();
         AVFormatContext* _avcontext = null;
@@ -33,7 +30,7 @@ namespace FFMpegLib.FFClasses
                     var sream = fmt->streams[i];
                     lock (_lock)
                     {
-                        Streams.Add(new(sream));
+                        Streams.TryAdd(i,new(sream));
                     }
                 }
 
@@ -61,7 +58,7 @@ namespace FFMpegLib.FFClasses
             lock (_lock)
             {
                 foreach (var strem in Streams)
-                    strem.Dispose();
+                    strem.Value.Dispose();
                 Streams.Clear();
 
                 if (_avcontext != null)

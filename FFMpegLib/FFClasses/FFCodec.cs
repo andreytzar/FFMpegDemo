@@ -16,6 +16,7 @@ namespace FFMpegLib.FFClasses
         internal AVCodecContext* CodecContext { get =>_codecctx;}
         public bool CodecInited { get; private set; }=false;
         readonly object _lock = new object();
+
         AVCodecParameters* _codecpar;
         AVCodec* _codec = null;
         AVCodecContext* _codecctx = null;
