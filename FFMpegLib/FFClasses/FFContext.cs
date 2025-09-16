@@ -7,9 +7,9 @@ namespace FFMpegLib.FFClasses
 {
     public unsafe class FFContext : IDisposable
     {
-        public bool IsOpen { get; private set; } =false;
+        public bool IsOpen { get; private set; } = false;
         public EventHandler<string>? OnError;
-        public ConcurrentDictionary<int, FFStream> Streams { get; private set; }=new ();
+        public ConcurrentDictionary<int, FFStream> Streams { get; private set; } = new();
 
         readonly object _lock = new object();
         AVFormatContext* _avcontext = null;
@@ -24,14 +24,14 @@ namespace FFMpegLib.FFClasses
                     throw new Exception(err.av_errorToString());
                 err = ffmpeg.avformat_find_stream_info(fmt, null);
                 if (err < 0)
+                {
+                    ffmpeg.avformat_close_input(&fmt);
                     throw new Exception(err.av_errorToString());
+                }
                 for (int i = 0; i < fmt->nb_streams; i++)
                 {
-                    var sream = fmt->streams[i];
-                    lock (_lock)
-                    {
-                        Streams.TryAdd(i,new(sream));
-                    }
+                    var stream = fmt->streams[i];
+                    Streams.TryAdd(i, new(stream));
                 }
 
                 lock (_lock)

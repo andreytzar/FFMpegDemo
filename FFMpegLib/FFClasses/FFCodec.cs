@@ -92,7 +92,6 @@ namespace FFMpegLib.FFClasses
                     _codecctx = null;
                 }
                 _codec = null;
-                _codecpar = null;
                 VideoParam = null;
                 AudioParam = null;
                 CodecInited= false;
