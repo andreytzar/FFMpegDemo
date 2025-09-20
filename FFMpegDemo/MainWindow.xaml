@@ -6,7 +6,42 @@
         xmlns:local="clr-namespace:FFMpegDemo"
         mc:Ignorable="d"
         Title="MainWindow" Height="450" Width="800">
-    <Grid>
-
+    <Grid Margin="3">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="auto"/>
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="200"/>
+            <ColumnDefinition Width="3"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+        <ItemsControl ItemsSource="{Binding NavBtns}">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <Button Content="{Binding MenuText}" Click="NavBtn_Click">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Background" Value="{x:Null}"/>
+                                <Setter Property="Margin" Value="4,1"/>
+                                <Setter Property="FontSize" Value="12"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                        <Setter Property="Background" Value="AliceBlue"/>
+                                        <Setter Property="Margin" Value="0,4"/>
+                                        <Setter Property="FontSize" Value="16"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <GridSplitter HorizontalAlignment="Stretch" Background="LightGray" Grid.Column="1"/>
+        <Frame x:Name="frame" Grid.Column="2" Margin="5" NavigationUIVisibility="Hidden"/>
+        <StatusBar Grid.Row="1" Grid.ColumnSpan="10">
+            <StatusBarItem Content="{Binding Status}"/>
+        </StatusBar>
     </Grid>
 </Window>

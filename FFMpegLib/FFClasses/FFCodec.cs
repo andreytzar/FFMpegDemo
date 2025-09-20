@@ -1,5 +1,6 @@
 ﻿using FFmpeg.AutoGen;
 using FFMpegLib.Helpers;
+using System.Windows.Media.Media3D;
 
 
 namespace FFMpegLib.FFClasses
@@ -103,6 +104,19 @@ namespace FFMpegLib.FFClasses
             Close();
             GC.SuppressFinalize(this);
         }
+
+        public override string ToString()
+        {
+            switch (StreamType)
+            {
+                case StreamType.UNKNOWN: break;
+                case StreamType.AUDIO:
+                    return $"{Codec_tag} {CodecID} {AudioParam}";
+                case StreamType.VIDEO:
+                    return $"{Codec_tag} {CodecID} {VideoParam}";
+            }
+            return $"{StreamType}";
+        }
     }
     public unsafe class VideoParam
     {
@@ -129,6 +143,11 @@ namespace FFMpegLib.FFClasses
             var fr = _codecpar->framerate;
             Framerate = new Rational { Num = fr.num, Den = fr.den };
             Video_delay = _codecpar->video_delay;
+        }
+
+        public override string ToString()
+        {
+            return $"Video: {Width}x{Height}, BitRate:{Bit_rate} Format {PixelFormat}, Framerate {Framerate?.Num}:{Framerate?.Den}, Ratio {Sample_aspect_ratio?.Num}:{Sample_aspect_ratio?.Den}";
         }
     }
     public class Rational
@@ -168,6 +187,10 @@ namespace FFMpegLib.FFClasses
             Initial_padding = _codecpar->initial_padding;
             Trailing_padding = _codecpar->trailing_padding;
             Seek_preroll = _codecpar->seek_preroll;
+        }
+        public override string ToString()
+        {
+            return $"Audio: ChanNm {ChanNm}, BitRate:{Bit_rate}, SampleRate {Sample_rate}";
         }
     }
 
