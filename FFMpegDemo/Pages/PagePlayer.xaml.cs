@@ -58,7 +58,6 @@ namespace FFMpegDemo.Pages
             _player.OnVideoBitmapChange += _player_OnVideoBitmapChange;
             BCOpenFile = new((o) =>
             {
-                _player.Stop();
                 file = string.Empty;
                 var diag = new OpenFileDialog()
                 {

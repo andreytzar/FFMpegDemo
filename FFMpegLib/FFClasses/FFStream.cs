@@ -1,7 +1,6 @@
 ﻿using FFmpeg.AutoGen;
 using NAudio.Gui;
-using System.Runtime.Intrinsics.X86;
-using System.Windows;              // для Int32Rect
+using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
@@ -17,13 +16,15 @@ namespace FFMpegLib.FFClasses
         public FFCodec? Codec { get; private set; }
         public StreamType StreamType { get; private set; } = StreamType.UNKNOWN;
         public CodecID CodecID { get; private set; } = CodecID.UNKNOWN;
-        object _lock = new object();
-        volatile bool _disposed = false;
+        readonly object _lock = new object();
+
         AVStream* _stream = null;
         SwsContext* _swsctx = null;
         AVFrame* _frame = null;
         AVFrame* _rgbframe = null;
         WriteableBitmap? _bitmap;
+
+        volatile bool _disposed = false;
 
         public FFStream(AVStream* stream)
         {
@@ -55,7 +56,7 @@ namespace FFMpegLib.FFClasses
                 if (ffmpeg.av_frame_get_buffer(rgbFrame, 1) >= 0)
                 {
                     _rgbframe = rgbFrame;
-                    Application.Current.Dispatcher.Invoke(() =>
+                    Application.Current.Dispatcher.BeginInvoke(() =>
                     {
                         _bitmap = new WriteableBitmap(param.Width, param.Height, 96, 96, PixelFormats.Bgr24, null);
                         OnVideoBitmapChange?.Invoke(this, _bitmap);
@@ -80,6 +81,7 @@ namespace FFMpegLib.FFClasses
 
         void ProceedVideoPacket(AVPacket* pkt)
         {
+            if (_disposed) return;
             bool needInit = false;
             lock (_lock)
             {
@@ -88,48 +90,50 @@ namespace FFMpegLib.FFClasses
                 if (_frame == null)
                     _frame = ffmpeg.av_frame_alloc();
                 if (_rgbframe == null || _swsctx == null || _bitmap == null) needInit = true;
+            }
 
+            if (needInit) InitSWS();
+            int err = 0;
+            try
+            {
+                if (_disposed || _swsctx == null || _bitmap == null || Codec.CodecContext == null || pkt == null) return;
+                err = ffmpeg.avcodec_send_packet(Codec.CodecContext, pkt);
+            }
+            catch { return; }
+            if (err < 0 || _disposed) return;
 
-                if (_disposed) return;
-                if (needInit) InitSWS();
-                if (_swsctx == null || _bitmap == null) return;
-
-                int err = ffmpeg.avcodec_send_packet(Codec.CodecContext, pkt);
-                if (err < 0 || _disposed) return;
-
-                if (err >= 0)
+            if (err >= 0)
+            {
+                while (!_disposed && ffmpeg.avcodec_receive_frame(Codec.CodecContext, _frame) == 0)
                 {
-                    while (!_disposed && ffmpeg.avcodec_receive_frame(Codec.CodecContext, _frame) == 0)
+                    if (_rgbframe == null || _rgbframe->width != _frame->width || _rgbframe->height != _frame->height)
                     {
-                        if (_rgbframe == null || _rgbframe->width != _frame->width || _rgbframe->height != _frame->height)
+                        InitSWS();
+                        if (_disposed || _swsctx == null || _rgbframe == null || _bitmap == null) break;
+                    }
+
+                    ffmpeg.sws_scale(_swsctx, _frame->data, _frame->linesize, 0, Codec.VideoParam.Height,
+                        _rgbframe->data, _rgbframe->linesize);
+
+                    int stride = _rgbframe->linesize[0];
+                    int bufSize = stride * Codec.VideoParam.Height;
+
+                    if (_disposed) break;
+
+                    if (_bitmap != null)
+                    {
+                        Application.Current.Dispatcher.BeginInvoke(() =>
                         {
-                            InitSWS();
-                            if (_disposed || _swsctx == null || _rgbframe == null || _bitmap == null) break;
-                        }
+                            if (_disposed) return;
+                            _bitmap.WritePixels(new Int32Rect(0, 0, Codec.VideoParam.Width, Codec.VideoParam.Height),
+                             (IntPtr)_rgbframe->data[0], bufSize, stride);
+                        });
 
-                        ffmpeg.sws_scale(_swsctx, _frame->data, _frame->linesize, 0, Codec.VideoParam.Height,
-                            _rgbframe->data, _rgbframe->linesize);
-
-                        int stride = _rgbframe->linesize[0];
-                        int bufSize = stride * Codec.VideoParam.Height;
-
-                        if (_disposed) return;
-
-                        if (_bitmap != null)
-                        {
-                            Application.Current.Dispatcher.Invoke(() =>
-                            {
-                                if (_disposed) return;
-                                _bitmap.WritePixels(new Int32Rect(0, 0, Codec.VideoParam.Width, Codec.VideoParam.Height),
-                                 (IntPtr)_rgbframe->data[0], bufSize, stride);
-                            });
-
-                        }
                     }
                 }
             }
+            if (_disposed) Free();
         }
-
 
 
         void Free()
@@ -150,14 +154,8 @@ namespace FFMpegLib.FFClasses
                 }
                 _bitmap = null;
             }
-        }
-
-        public void Dispose()
-        {
-            Free();
-            lock (_lock)
+            if (_disposed)
             {
-                _disposed = true;
                 Codec?.Dispose();
                 if (_frame != null)
                 {
@@ -165,8 +163,13 @@ namespace FFMpegLib.FFClasses
                     ffmpeg.av_frame_free(&temp);
                     _frame = null;
                 }
-            }
 
+            }
+        }
+
+        public void Dispose()
+        {
+            _disposed = true;
         }
 
         public override string ToString()
@@ -176,17 +179,17 @@ namespace FFMpegLib.FFClasses
     }
 
     public enum StreamType : int
-{
-    /// <summary>Usually treated as AVMEDIA_TYPE_DATA</summary>
-    UNKNOWN = -1,
-    VIDEO = 0,
-    AUDIO = 1,
-    /// <summary>Opaque data information usually continuous</summary>
-    DATA = 2,
-    SUBTITLE = 3,
-    /// <summary>Opaque data information usually sparse</summary>
-    ATTACHMENT = 4,
-    TYPE_NB = 5,
-}
+    {
+        /// <summary>Usually treated as AVMEDIA_TYPE_DATA</summary>
+        UNKNOWN = -1,
+        VIDEO = 0,
+        AUDIO = 1,
+        /// <summary>Opaque data information usually continuous</summary>
+        DATA = 2,
+        SUBTITLE = 3,
+        /// <summary>Opaque data information usually sparse</summary>
+        ATTACHMENT = 4,
+        TYPE_NB = 5,
+    }
 }
 

@@ -1,6 +1,7 @@
 ﻿using FFmpeg.AutoGen;
 using FFMpegLib.Helpers;
-using System.Windows.Media.Media3D;
+using System.Windows;
+
 
 
 namespace FFMpegLib.FFClasses
@@ -84,6 +85,7 @@ namespace FFMpegLib.FFClasses
 
         void Close()
         {
+          
             lock (_lock)
             {
                 if (_codecctx != null)
@@ -102,6 +104,7 @@ namespace FFMpegLib.FFClasses
         public void Dispose()
         {
             Close();
+            Application.Current.Dispatcher.Invoke(() => { });
             GC.SuppressFinalize(this);
         }
 
