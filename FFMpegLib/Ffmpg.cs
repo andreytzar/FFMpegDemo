@@ -46,11 +46,14 @@ namespace FFMpegLib
             try
             {
                 var lineBuffer = stackalloc byte[1024];
-                ffmpeg.av_log_format_line(ptr, level, format, vl, lineBuffer, 1024, null);
-                string message = Marshal.PtrToStringAnsi((IntPtr)lineBuffer) ?? "";
+                int printPrefix = 1;
+                ffmpeg.av_log_format_line(ptr, level, format, vl, lineBuffer, 1024, &printPrefix);
+
+                string line = Marshal.PtrToStringAnsi((IntPtr)lineBuffer)??"";
+
                 lock (_lock)
                 {
-                    File.AppendAllText(logPath, $"{DateTime.Now:yy-MM-dd HH:mm:ss} [{level}] {message}");
+                    File.AppendAllText(logPath, $"{DateTime.Now:yy-MM-dd HH:mm:ss} [{level}] {line}");
                 }
             }
             catch { }

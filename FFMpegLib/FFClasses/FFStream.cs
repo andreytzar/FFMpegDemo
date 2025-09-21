@@ -25,6 +25,7 @@ namespace FFMpegLib.FFClasses
         WriteableBitmap? _bitmap;
 
         volatile bool _disposed = false;
+        volatile bool _initingSWS = false;
 
         public FFStream(AVStream* stream)
         {
@@ -41,27 +42,40 @@ namespace FFMpegLib.FFClasses
         void InitSWS()
         {
             if (StreamType != StreamType.VIDEO || Codec == null || !Codec.CodecInited || Codec.VideoParam == null || Codec.CodecContext == null) return;
-            Free();
-            var param = Codec.VideoParam;
-            var sws = ffmpeg.sws_getContext(param.Width, param.Height, param.PixelFormat,
-                     param.Width, param.Height, AVPixelFormat.AV_PIX_FMT_BGR24, ffmpeg.SWS_BILINEAR, null, null, null);
-            if (sws != null)
+            try
             {
-                _swsctx = sws;
-
-                var rgbFrame = ffmpeg.av_frame_alloc();
-                rgbFrame->format = (int)AVPixelFormat.AV_PIX_FMT_BGR24;
-                rgbFrame->width = param.Width;
-                rgbFrame->height = param.Height;
-                if (ffmpeg.av_frame_get_buffer(rgbFrame, 1) >= 0)
+                _initingSWS = true;
+                FreeSWS();
+                var param = Codec.VideoParam;
+                var sws = ffmpeg.sws_getContext(param.Width, param.Height, param.PixelFormat,
+                         param.Width, param.Height, AVPixelFormat.AV_PIX_FMT_BGR24, ffmpeg.SWS_BILINEAR, null, null, null);
+                if (sws != null)
                 {
-                    _rgbframe = rgbFrame;
-                    Application.Current.Dispatcher.BeginInvoke(() =>
+                    var rgbFrame = ffmpeg.av_frame_alloc();
+                    if (rgbFrame != null)
                     {
-                        _bitmap = new WriteableBitmap(param.Width, param.Height, 96, 96, PixelFormats.Bgr24, null);
-                        OnVideoBitmapChange?.Invoke(this, _bitmap);
-                    });
+                        rgbFrame->format = (int)AVPixelFormat.AV_PIX_FMT_BGR24;
+                        rgbFrame->width = param.Width;
+                        rgbFrame->height = param.Height;
+
+                        if (ffmpeg.av_frame_get_buffer(rgbFrame, 0) >= 0)
+                        {
+                            _rgbframe = rgbFrame;
+                            _swsctx = sws;
+                            Application.Current.Dispatcher.Invoke(() =>
+                            {
+                                _bitmap = new WriteableBitmap(param.Width, param.Height, 96, 96, PixelFormats.Bgr24, null);
+                                OnVideoBitmapChange?.Invoke(this, _bitmap);
+                            });
+                        }
+                        else ffmpeg.av_frame_free(&rgbFrame);
+                    }
+                    else ffmpeg.sws_freeContext(sws);
                 }
+            }
+            finally
+            {
+                _initingSWS = false;
             }
 
         }
@@ -69,7 +83,7 @@ namespace FFMpegLib.FFClasses
 
         internal void ProceedPacket(AVPacket* pkt)
         {
-            if (pkt->stream_index != Index) return;
+            if (pkt == null || pkt->stream_index != Index) return;
             switch (StreamType)
             {
                 case StreamType.VIDEO:
@@ -81,62 +95,42 @@ namespace FFMpegLib.FFClasses
 
         void ProceedVideoPacket(AVPacket* pkt)
         {
-            if (_disposed) return;
-            bool needInit = false;
-            lock (_lock)
-            {
-                if (_disposed) return;
-                if (Codec == null || !Codec.CodecInited || Codec.CodecContext == null || Codec.VideoParam == null) return;
-                if (_frame == null)
-                    _frame = ffmpeg.av_frame_alloc();
-                if (_rgbframe == null || _swsctx == null || _bitmap == null) needInit = true;
-            }
+            if (_initingSWS) return;
+            if (Codec == null || !Codec.CodecInited || Codec.CodecContext == null || Codec.VideoParam == null) return;
+            if (_frame == null)
+                _frame = ffmpeg.av_frame_alloc();
 
-            if (needInit) InitSWS();
-            int err = 0;
-            try
-            {
-                if (_disposed || _swsctx == null || _bitmap == null || Codec.CodecContext == null || pkt == null) return;
-                err = ffmpeg.avcodec_send_packet(Codec.CodecContext, pkt);
-            }
-            catch { return; }
-            if (err < 0 || _disposed) return;
+            if (_swsctx == null || _rgbframe == null || _bitmap == null)
+                InitSWS();
+            if (_frame == null || _rgbframe == null || _swsctx == null || _bitmap == null) return;
 
-            if (err >= 0)
+            if (ffmpeg.avcodec_send_packet(Codec.CodecContext, pkt) < 0) return;
+
+            while (ffmpeg.avcodec_receive_frame(Codec.CodecContext, _frame) == 0)
             {
-                while (!_disposed && ffmpeg.avcodec_receive_frame(Codec.CodecContext, _frame) == 0)
+                if (_rgbframe == null || _rgbframe->width != _frame->width || _rgbframe->height != _frame->height)
                 {
-                    if (_rgbframe == null || _rgbframe->width != _frame->width || _rgbframe->height != _frame->height)
-                    {
-                        InitSWS();
-                        if (_disposed || _swsctx == null || _rgbframe == null || _bitmap == null) break;
-                    }
-
-                    ffmpeg.sws_scale(_swsctx, _frame->data, _frame->linesize, 0, Codec.VideoParam.Height,
-                        _rgbframe->data, _rgbframe->linesize);
-
-                    int stride = _rgbframe->linesize[0];
-                    int bufSize = stride * Codec.VideoParam.Height;
-
-                    if (_disposed) break;
-
-                    if (_bitmap != null)
-                    {
-                        Application.Current.Dispatcher.BeginInvoke(() =>
-                        {
-                            if (_disposed) return;
-                            _bitmap.WritePixels(new Int32Rect(0, 0, Codec.VideoParam.Width, Codec.VideoParam.Height),
-                             (IntPtr)_rgbframe->data[0], bufSize, stride);
-                        });
-
-                    }
+                    InitSWS();
+                    if (_swsctx == null || _rgbframe == null || _bitmap == null) return;
                 }
+
+                ffmpeg.sws_scale(_swsctx, _frame->data, _frame->linesize, 0, Codec.VideoParam.Height,
+                    _rgbframe->data, _rgbframe->linesize);
+
+                int stride = _rgbframe->linesize[0];
+                int bufSize = stride * Codec.VideoParam.Height;
+
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    if (_disposed) return;
+                    _bitmap.WritePixels(new Int32Rect(0, 0, Codec.VideoParam.Width, Codec.VideoParam.Height),
+                     (IntPtr)_rgbframe->data[0], bufSize, stride);
+                });
             }
-            if (_disposed) Free();
         }
 
 
-        void Free()
+        void FreeSWS()
         {
             lock (_lock)
             {
@@ -154,22 +148,20 @@ namespace FFMpegLib.FFClasses
                 }
                 _bitmap = null;
             }
-            if (_disposed)
-            {
-                Codec?.Dispose();
-                if (_frame != null)
-                {
-                    var temp = _frame;
-                    ffmpeg.av_frame_free(&temp);
-                    _frame = null;
-                }
-
-            }
         }
 
         public void Dispose()
         {
             _disposed = true;
+            FreeSWS();
+
+            Codec?.Dispose();
+            if (_frame != null)
+            {
+                var temp = _frame;
+                ffmpeg.av_frame_free(&temp);
+                _frame = null;
+            }
         }
 
         public override string ToString()

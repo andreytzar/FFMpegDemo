@@ -10,8 +10,8 @@ namespace FFMpegLib.FFClasses
 {
     public unsafe class FFContext : IDisposable
     {
-        public  bool IsOpened { get => IsOpen; }
-       
+        public bool IsOpened { get => IsOpen; }
+
         public EventHandler<string>? OnError;
         public EventHandler<WriteableBitmap>? OnVideoBitmapChange;
         public ConcurrentDictionary<int, FFStream> Streams { get; private set; } = new();
@@ -20,14 +20,14 @@ namespace FFMpegLib.FFClasses
         readonly object _lock = new object();
 
         AVFormatContext* _avcontext = null;
-        AVPacket* pkt = null;
+
+        int _activeTasks = 0;
 
         public bool Open(string path)
         {
             try
             {
-                AVPacket* p = ffmpeg.av_packet_alloc();
-                if (p!=null) pkt = p;
+                Close();
                 AVFormatContext* fmt = null;
                 int err = ffmpeg.avformat_open_input(&fmt, path, null, null);
                 if (err != 0)
@@ -49,13 +49,11 @@ namespace FFMpegLib.FFClasses
                 lock (_lock)
                 {
                     _avcontext = fmt;
-                    IsOpen=true;
                 }
-
-                return true;
+                IsOpen = true;
             }
             catch (Exception e)
-            {                   
+            {
                 IsOpen = false;
                 OnError?.Invoke(this, e.Message);
             }
@@ -65,21 +63,42 @@ namespace FFMpegLib.FFClasses
         public void Play()
         {
             if (!IsOpen) return;
-            Task.Run(() =>
+            Task.Run(PlayLoop);
+        }
+
+        void PlayLoop()
+        {
+            if (!IsOpen) return;
+            var pkt = ffmpeg.av_packet_alloc();
+            try
             {
+               
+                Interlocked.Increment(ref _activeTasks);
+
                 while (IsOpen && pkt != null && ffmpeg.av_read_frame(_avcontext, pkt) >= 0)
                 {
                     var ind = pkt->stream_index;
                     if (Streams.TryGetValue(ind, out var stream)) stream?.ProceedPacket(pkt);
                     ffmpeg.av_packet_unref(pkt);
                 }
-            });
+            }
+            catch { }
+            finally
+            {
+                Interlocked.Decrement(ref _activeTasks);
+                if (pkt != null)
+                {
+                    ffmpeg.av_packet_free(&pkt);
+                    pkt = null;
+                }
+
+            }
         }
 
-        
         public void Close()
         {
             IsOpen = false;
+            SpinWait.SpinUntil(() => Interlocked.CompareExchange(ref _activeTasks, 0, 0) == 0);
             lock (_lock)
             {
                 foreach (var strem in Streams)
@@ -89,13 +108,6 @@ namespace FFMpegLib.FFClasses
                 }
 
                 Streams.Clear();
-
-                if (pkt != null)
-                {
-                    var temp=pkt;
-                    ffmpeg.av_packet_free(&temp);
-                    pkt = null;
-                }
 
                 if (_avcontext != null)
                 {

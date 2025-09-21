@@ -44,7 +44,7 @@ namespace FFMpegDemo.Pages
         string _file = string.Empty;
         public string file { get => _file; set { if (_file != value) { _file = value; _file = _file.Trim(); OnPropertyChanged(); OnFileChanged(); } } }
         string _Error = string.Empty;
-        public string Error { get => _Error; set { { _Error = value; OnPropertyChanged(); Task.Run(async () => {await Task.Delay(25000); Error = ""; }); } } }
+        public string Error { get => _Error; set { { _Error = value; OnPropertyChanged(); if (!string.IsNullOrEmpty(_Error)) Task.Run(async () => {await Task.Delay(40000); Error = ""; }); } } }
         WriteableBitmap? _VideoBitmap;
         public WriteableBitmap? VideoBitmap { get => _VideoBitmap; set { if (_VideoBitmap != value) { _VideoBitmap = value; OnPropertyChanged(); } } }
         public event EventHandler<string>? StatusChanged;
