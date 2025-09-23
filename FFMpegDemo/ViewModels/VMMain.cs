@@ -7,7 +7,7 @@ using System.Collections.ObjectModel;
 
 namespace FFMpegDemo.ViewModels
 {
-    public class VMMain : VMNotifyPropretyChanged
+    public class VMMain : VMNotifyPropretyChanged, IDisposable
     {
 
         string _Status = string.Empty;
@@ -36,5 +36,11 @@ namespace FFMpegDemo.ViewModels
 
         private void OnStatusChanged(object? sender, string e) => Status = e;
 
+        public void Dispose()
+        {
+            var dis= NavBtns.Where(x=>x.Page!=null).Where(x=>x.Page.DataContext is IDisposable).Select(x=>x.Page.DataContext as IDisposable).ToList();
+            foreach(var x in dis)
+                x?.Dispose();
+        }
     }
 }

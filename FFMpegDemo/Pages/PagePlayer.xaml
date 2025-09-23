@@ -20,7 +20,13 @@
         </DockPanel>
         <Grid Margin="3" Grid.Row="1" Background="DarkGray">
             <Image Source="{Binding VideoBitmap}" Stretch="Uniform"/>
-            <TextBlock Text="{Binding Error, UpdateSourceTrigger=PropertyChanged}" Foreground="AliceBlue" VerticalAlignment="Center" HorizontalAlignment="Center" TextWrapping="Wrap"/>
+            <ListView ItemsSource="{Binding InfoList}" Foreground="AliceBlue" VerticalAlignment="Stretch" HorizontalAlignment="Stretch" Background="{x:Null}" ScrollViewer.VerticalScrollBarVisibility="Disabled">
+                <ListView.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding}"  TextWrapping="Wrap"/>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
         </Grid>
         <Grid Grid.Row="2">
             <Grid.RowDefinitions>

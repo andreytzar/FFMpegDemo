@@ -35,7 +35,7 @@ namespace FFMpegLib
                 File.Delete(logPath);
             
             _logCallback = new av_log_set_callback_callback(LogCallback);
-            ffmpeg.av_log_set_level(ffmpeg.AV_LOG_ERROR);
+            ffmpeg.av_log_set_level(ffmpeg.AV_LOG_DEBUG);
             ffmpeg.av_log_set_callback(_logCallback);
         }
 

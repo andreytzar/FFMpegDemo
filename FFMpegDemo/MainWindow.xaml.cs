@@ -26,8 +26,7 @@ namespace FFMpegDemo
         }
         private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
         {
-            foreach (var dis in vm.NavBtns.Where(x => x.Page is IDisposable).Select(x => x.Page as IDisposable).ToList())
-                dis?.Dispose();
+            vm.Dispose();
         }
         private void NavBtn_Click(object sender, RoutedEventArgs e)
         {
