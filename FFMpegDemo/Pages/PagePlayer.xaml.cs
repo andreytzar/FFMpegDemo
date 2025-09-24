@@ -54,7 +54,7 @@ namespace FFMpegDemo.Pages
         {
             _player.OnInfo += _player_OnInfo;
             _player.OnError += _player_OnError;
-            _player.OnVideoBitmapChange += _player_OnVideoBitmapChange;
+            _player.OnVideoChange += _player_OnVideoBitmapChange;
             BCOpenFile = new((o) =>
             {
                 file = string.Empty;
@@ -81,7 +81,7 @@ namespace FFMpegDemo.Pages
                     var last = InfoList.LastOrDefault("");
                     InfoList.Remove(last);
                 });
-                await Task.Delay(10000, token);
+                await Task.Delay(5000, token);
             }
         }
 

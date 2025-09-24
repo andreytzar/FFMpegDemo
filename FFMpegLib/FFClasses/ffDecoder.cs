@@ -1,31 +1,24 @@
 ﻿using FFmpeg.AutoGen;
-using FFMpegLib.Helpers;
 using FFMpegLib.Models;
-using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+
 
 namespace FFMpegLib.FFClasses
 {
     public unsafe class ffDecoder : IDisposable
     {
-        readonly BlockingCollection<IntPtr> _packetQueue;
-        Task? _decodeTask;
-
-        private CancellationTokenSource? _cts;
-
-        private readonly List<FFCodec> _codecs = new();
-        private CancellationTokenSource? _cts;
-
-
-        public event EventHandler<AVFrame>? OnVideoFrameReady;
-        public event EventHandler<AVFrame>? OnAudioFrameReady;
+        static int _frameQueueCount = 50;
+        public BlockingCollection<ffFrame> FrameQueue { get; private set; } = new ();
         public event EventHandler<string>? OnError;
+        public event EventHandler<string>? OnInfo;
 
-        private readonly object _lock = new();
+        readonly BlockingCollection<IntPtr> _packetQueue;
+
+        Dictionary<int, FFCodec> _codecs = new();
+
+        Task? _decodeTask;
+        CancellationTokenSource? _ctsdecoder;
+        readonly object _lock = new();
 
         public ffDecoder(BlockingCollection<IntPtr> packetQueue)
         {
@@ -35,6 +28,7 @@ namespace FFMpegLib.FFClasses
         public void StartDecoding(IEnumerable<ffStreamInfo> streams)
         {
             StopDecoding();
+            ClearCodecs();
 
             foreach (var s in streams)
             {
@@ -42,25 +36,21 @@ namespace FFMpegLib.FFClasses
                     s.MediaType == AVMediaType.AVMEDIA_TYPE_AUDIO)
                 {
                     var codec = new FFCodec(s);
+                    codec.OnError += OnError;
                     if (codec.CodecInited)
-                        _codecs.Add(codec);
+                        _codecs.TryAdd(s.Index, codec);
                 }
             }
+            if (_codecs.Count > 0)
+            {
+                OnInfo?.Invoke(this, $"Decoder: Start Decoding. Codecs to Decoding: {_codecs.Count}");
+                _ctsdecoder = new CancellationTokenSource();
+                _decodeTask = Task.Run(() => DecodeLoop(_ctsdecoder.Token), _ctsdecoder.Token);
+            }
+            else OnError?.Invoke(this, $"Decoder: No codecs avalible");
 
-            _cts = new CancellationTokenSource();
-            _decodeTask = Task.Run(() => DecodeLoop(_cts.Token), _cts.Token);
         }
 
-
-
-        public void Start()
-        {
-            Stop();
-            if (!_demuxer.IsOpen || _demuxer.PacketQueue == null) return;
-
-            _cts = new CancellationTokenSource();
-            _decodeTask = Task.Run(() => DecodeLoop(_cts.Token), _cts.Token);
-        }
 
         private void DecodeLoop(CancellationToken token)
         {
@@ -68,9 +58,15 @@ namespace FFMpegLib.FFClasses
             {
                 while (!token.IsCancellationRequested)
                 {
-                    if (_demuxer.PacketQueue == null) break;
+                    if (_packetQueue == null) break;
+                    if (FrameQueue.Count > _frameQueueCount)
+                    {
+                        token.WaitHandle.WaitOne(100);
+                        continue;
+                    }
+                    if (token.IsCancellationRequested) break;
 
-                    if (!_demuxer.PacketQueue.TryTake(out var ptr, Timeout.Infinite, token))
+                    if (!_packetQueue.TryTake(out var ptr, 1000, token))
                         continue;
 
                     var pkt = (AVPacket*)ptr;
@@ -78,59 +74,57 @@ namespace FFMpegLib.FFClasses
 
                     if (_codecs.TryGetValue(pkt->stream_index, out var codec) && codec.CodecInited)
                     {
-                        int ret = ffmpeg.avcodec_send_packet(codec.CodecContext, pkt);
-                        if (ret < 0)
-                        {
-                            OnError?.Invoke(this, $"avcodec_send_packet error {ret.av_errorToString()}");
-                            ffmpeg.av_packet_free(&pkt);
-                            continue;
-                        }
-                        AVFrame* frame = ffmpeg.av_frame_alloc();
-                        while (true)
-                        {
-                            ret = ffmpeg.avcodec_receive_frame(codec.CodecContext, frame);
-                            if (ret == ffmpeg.AVERROR(ffmpeg.EAGAIN) || ret == ffmpeg.AVERROR_EOF)
-                            {
-                                break;
-                            }
-                            if (ret < 0)
-                            {
-                                OnError?.Invoke(this, $"avcodec_receive_frame error {ret.av_errorToString()}");
-                                break;
-                            }
-
-                            if (codec.MediaType == AVMediaType.AVMEDIA_TYPE_VIDEO)
-                                OnVideoFrameReady?.Invoke(this, *frame);
-                            else if (codec.MediaType == AVMediaType.AVMEDIA_TYPE_AUDIO)
-                                OnAudioFrameReady?.Invoke(this, *frame);
-
-                            ffmpeg.av_frame_unref(frame);
-                        }
-                        ffmpeg.av_frame_free(&frame);
+                        var frames = codec.GetFramesFromPacket(pkt);
+                        if (frames != null)
+                            foreach (var frame in frames)
+                                if (!FrameQueue.TryAdd(frame, 50, token))
+                                {
+                                    var temp = frame.frame;
+                                    ffmpeg.av_frame_free(&temp);
+                                }
                     }
-
                     ffmpeg.av_packet_free(&pkt);
                 }
             }
             catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                OnError?.Invoke(this, $"Decoder DecodeLoop crash: {ex.Message}");
+            }
         }
-
-        public void Stop()
+        public void StopDecoding()
         {
-            _cts?.Cancel();
-            try { _decodeTask?.Wait(); } catch { }
-            _cts?.Dispose();
-            _decodeTask = null;
-            _cts = null;
+            OnInfo?.Invoke(this, $"Decoder: Stop Decoding.");
+            _ctsdecoder?.Cancel();
+            if (_decodeTask != null)
+                try { _decodeTask?.Wait(); } catch { }
+            while (_packetQueue.TryTake(out var ptr))
+            {
+                AVPacket* pkt = (AVPacket*)ptr;
+                ffmpeg.av_packet_free(&pkt);
+            }
+            lock (_lock)
+            {
+                _decodeTask = null;
+            }
+            _ctsdecoder?.Dispose();
+            lock (_lock)
+            {
+                _ctsdecoder = null;
+            }
         }
-
-        public void Dispose()
+        void ClearCodecs()
         {
-            Stop();
             foreach (var c in _codecs.Values)
                 c.Dispose();
             _codecs.Clear();
         }
-    }
 
+
+        public void Dispose()
+        {
+            StopDecoding();
+            ClearCodecs();
+        }
+    }
 }

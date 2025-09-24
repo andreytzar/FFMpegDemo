@@ -1,14 +1,8 @@
 ﻿using FFmpeg.AutoGen;
 using FFMpegLib.Helpers;
 using FFMpegLib.Models;
-using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Windows.Shapes;
 
 namespace FFMpegLib.FFClasses
 {
@@ -31,6 +25,8 @@ namespace FFMpegLib.FFClasses
         volatile bool _IsOpen = false;
         readonly object _lock = new();
         CancellationTokenSource? _ctsreader;
+
+        
 
         public bool OpenFile(string file)
         {
@@ -80,7 +76,7 @@ namespace FFMpegLib.FFClasses
             StopReading();
             if (!_IsOpen || _fmtCtx == null) return;
             _ctsreader = new CancellationTokenSource();
-            Info("Sart Reading");
+            Info("Start Reading");
             _readerTask = Task.Run(() => ReadLoop(_ctsreader.Token), _ctsreader.Token);
 
         }
@@ -102,6 +98,7 @@ namespace FFMpegLib.FFClasses
                     int ret = ffmpeg.av_read_frame(_fmtCtx, pkt);
                     if (ret < 0)
                     {
+                        Info($"ReadLoop: end of stream or error: {ret.av_errorToString()}");
                         // кінець файлу або помилка
                         ffmpeg.av_packet_free(&pkt);
                         break;
@@ -116,15 +113,8 @@ namespace FFMpegLib.FFClasses
         {
             _ctsreader?.Cancel();
             if (_readerTask != null) Info("Stop Reading");
-            try { _readerTask?.Wait(); } catch { }
-
-            while (PacketQueue.TryTake(out var ptr))
-            {
-                AVPacket* pkt = (AVPacket*)ptr;
-                ffmpeg.av_packet_free(&pkt);
-            }
+            try { _readerTask?.Wait(); } catch { }   
             _ctsreader?.Dispose();
-
             lock (_lock)
             {
                 _readerTask = null;
@@ -158,7 +148,6 @@ namespace FFMpegLib.FFClasses
         public void Dispose()
         {
             Close();
-            PacketQueue.Dispose();
         }
     }
 }

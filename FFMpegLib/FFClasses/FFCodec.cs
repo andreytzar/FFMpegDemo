@@ -1,7 +1,7 @@
 ﻿using FFmpeg.AutoGen;
 using FFMpegLib.Helpers;
 using FFMpegLib.Models;
-using System.Windows;
+
 
 
 
@@ -71,10 +71,40 @@ namespace FFMpegLib.FFClasses
             }
             else OnError?.Invoke(this, $"No codec found");
         }
+        public List<ffFrame>? GetFramesFromPacket(AVPacket* pkt)
+        {
+            if (!_inited || pkt ==null || pkt->stream_index!=StreamId) return null;
+            List<ffFrame> res=new List<ffFrame>();
+            
+            int ret = ffmpeg.avcodec_send_packet(_codecctx, pkt);
+            if (ret < 0)
+            {
+                OnError?.Invoke(this, $"Codec: avcodec_send_packet error {ret.av_errorToString()}");
+                return null;
+            }
+
+            do
+            {
+                AVFrame* frame = ffmpeg.av_frame_alloc();
+                ret = ffmpeg.avcodec_receive_frame(_codecctx, frame);
+                if (ret == ffmpeg.AVERROR(ffmpeg.EAGAIN) || ret == ffmpeg.AVERROR_EOF)
+                {
+                    ffmpeg.av_frame_free(&frame);
+                    break;
+                }
+                if (ret < 0)
+                {
+                    ffmpeg.av_frame_free(&frame);
+                    OnError?.Invoke(this, $"Codec avcodec_receive_frame error {ret.av_errorToString()}");
+                    break;
+                }
+                res.Add(new ffFrame(MediaType,frame, StreamInfo.TimeBase, StreamInfo.StartTime));
+            } while (ret >= 0);
+            return res;
+        }
 
         void Close()
         {
-           
             lock (_lock)
             {
                 _inited = false;
