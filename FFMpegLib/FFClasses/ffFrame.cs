@@ -9,6 +9,7 @@ namespace FFMpegLib.FFClasses
         internal AVFrame* frame { get; private set; }
         internal AVRational TimeBase { get; private set; }
         internal long StartYime { get; private set; }
+
         public ffFrame(AVMediaType mediaType, AVFrame* frame, AVRational timeBase, long startYime)
         {
             MediaType = mediaType;

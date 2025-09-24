@@ -9,7 +9,7 @@ namespace FFMpegLib.FFClasses
 {
     public unsafe class FFCodec : IDisposable
     {
-        public int StreamId { get => StreamInfo.Index; }
+        public int StreamIndex { get => StreamInfo.Index; }
         public ffStreamInfo StreamInfo { get; }
         public AVMediaType MediaType { get; private set; } = AVMediaType.AVMEDIA_TYPE_UNKNOWN;
         public AVCodecID CodecID { get; private set; } = AVCodecID.AV_CODEC_ID_FIRST_UNKNOWN;
@@ -73,7 +73,7 @@ namespace FFMpegLib.FFClasses
         }
         public List<ffFrame>? GetFramesFromPacket(AVPacket* pkt)
         {
-            if (!_inited || pkt ==null || pkt->stream_index!=StreamId) return null;
+            if (!_inited || pkt ==null || pkt->stream_index!=StreamIndex) return null;
             List<ffFrame> res=new List<ffFrame>();
             
             int ret = ffmpeg.avcodec_send_packet(_codecctx, pkt);

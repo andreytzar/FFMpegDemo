@@ -2,6 +2,7 @@
 
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Windows.Controls;
 using System.Windows.Media.Imaging;
 
 namespace FFMpegLib.FFClasses
@@ -42,9 +43,10 @@ namespace FFMpegLib.FFClasses
 
         void RenderLoop(CancellationToken token)
         {
+
+            _clock.Reset();
             try
             {
-                _clock.Reset();
                 while (!token.IsCancellationRequested)
                 {
                     if (_frameQueue == null) break;
@@ -55,24 +57,7 @@ namespace FFMpegLib.FFClasses
                         continue;
 
                     if (frame != null && frame.frame != null)
-                    {
-                        if (frame.MediaType == AVMediaType.AVMEDIA_TYPE_VIDEO)
-                        {
-                            double ptsSec = 0;
-                            if (frame.frame->pts != ffmpeg.AV_NOPTS_VALUE)
-                                ptsSec = (frame.frame->pts - frame.StartYime != ffmpeg.AV_NOPTS_VALUE ? frame.StartYime : 0) * ffmpeg.av_q2d(frame.TimeBase);
-
-                            double elapsed = _clock.Elapsed.TotalSeconds;
-                            double delay = ptsSec - elapsed;
-                            if (!token.IsCancellationRequested)
-                            {
-                                if (delay > 0)
-                                    token.WaitHandle.WaitOne((int)(delay * 1000));
-                                _videoRender.ProcessFrame(frame,token);
-                            }
-                        }
-                        frame.Dispose();
-                    }
+                        ProcessFrame(frame, token);
                 }
             }
             catch (OperationCanceledException) { }
@@ -80,6 +65,26 @@ namespace FFMpegLib.FFClasses
             {
                 OnError?.Invoke(this, $"Render RenderLoop crash: {ex.Message}");
             }
+        }
+
+        void ProcessFrame(ffFrame frame, CancellationToken token)
+        {
+            if (frame.MediaType == AVMediaType.AVMEDIA_TYPE_VIDEO)
+            {
+                double ptsSec = 0;
+                if (frame.frame->pts != ffmpeg.AV_NOPTS_VALUE)
+                    ptsSec = (frame.frame->pts - frame.StartYime != ffmpeg.AV_NOPTS_VALUE ? frame.StartYime : 0) * ffmpeg.av_q2d(frame.TimeBase);
+
+                double elapsed = _clock.Elapsed.TotalSeconds;
+                double delay = ptsSec - elapsed;
+                if (!token.IsCancellationRequested)
+                {
+                    if (delay > 0)
+                        token.WaitHandle.WaitOne((int)(delay * 1000));
+                    _videoRender.ProcessFrame(frame, token);
+                }
+            }
+            frame.Dispose();
         }
 
         public void StopRender()
@@ -91,7 +96,8 @@ namespace FFMpegLib.FFClasses
                     var completed = Task.WhenAny(_renderTask!, Task.Delay(5000)).Result;
                     if (completed != _renderTask)
                         OnError?.Invoke(this, "StopRender timeout (render thread still running)");
-                } catch { }
+                }
+                catch { }
             while (_frameQueue.TryTake(out var frame))
             {
                 frame.Dispose();
