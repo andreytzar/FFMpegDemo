@@ -13,6 +13,7 @@
             <RowDefinition Height="auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="auto"/>
+            <RowDefinition Height="auto"/>
         </Grid.RowDefinitions>
         <DockPanel LastChildFill="False">
             <TextBlock Text="Приклад FFMPEG Плеєру" FontSize="18" DockPanel.Dock="Top"/>
@@ -28,7 +29,17 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
         </Grid>
-        <Grid Grid.Row="2">
+        <Border Grid.Row="2" Margin="0,2" BorderBrush="Gray" BorderThickness="1">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="auto"/>
+                    <RowDefinition Height="auto"/>
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0"/>
+                <ProgressBar Height="10" Grid.Row="1"/>
+            </Grid>
+        </Border>
+        <Grid Grid.Row="3">
             <Grid.RowDefinitions>
                 <RowDefinition Height="auto"/>
             </Grid.RowDefinitions>

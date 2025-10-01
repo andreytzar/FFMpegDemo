@@ -1,7 +1,7 @@
 ﻿using FFmpeg.AutoGen;
 
 
-namespace FFMpegLib.FFClasses
+namespace FFMpegLib.Models
 {
     public unsafe class ffFrame : IDisposable
     {
